@@ -1,750 +1,4 @@
-                start_address=start_address,
-                end_address=end_address,
-                record_count=0,
-                density=0.0,
-                biological_pattern='NONE',
-                average_quality=0.0,
-                access_frequency=0,
-                collision_count=0,
-                optimization_priority=0.0,
-                last_optimized=time.time()
-            
-        
-        # Update region statistics
-        region = self.address_regions[region_id]
-        region.record_count += 1
-        region.density = region.record_count / self.region_size
-        
-        # Update biological pattern
-        pattern = request.biological_characteristics.get('pattern_class', 'UNKNOWN')
-        if region.biological_pattern == 'NONE':
-            region.biological_pattern = pattern
-        elif region.biological_pattern != pattern:
-            region.biological_pattern = 'MIXED'
-        
-        # Update quality metrics
-        if region.record_count == 1:
-            region.average_quality = request.quality_score
-        else:
-            region.average_quality = ((region.average_quality * (region.record_count - 1) + 
-                                     request.quality_score) / region.record_count)
-        
-        region.access_frequency += 1
-        
-        # Update pattern distributions
-        if pattern not in self.pattern_distributions:
-            self.pattern_distributions[pattern] = {
-                'count': 0,
-                'regions': set(),
-                'average_quality': 0.0,
-                'addresses': []
-            }
-        
-        self.pattern_distributions[pattern]['count'] += 1
-        self.pattern_distributions[pattern]['regions'].add(region_id)
-        self.pattern_distributions[pattern]['addresses'].append(address)
-        
-        # Update quality distribution
-        self.quality_distributions[pattern].append(request.quality_score)
-    
-    def _assess_clustering_quality(self, address: int, request: AddressAllocationRequest) -> float:
-        """Assess how well the allocated address preserves biological clustering."""
-        pattern = request.biological_characteristics.get('pattern_class', 'UNKNOWN')
-        region_id = address // self.region_size
-        
-        if region_id not in self.address_regions:
-            return 0.5  # Neutral quality for new regions
-        
-        region = self.address_regions[region_id]
-        
-        # Check if pattern matches region's dominant pattern
-        if region.biological_pattern == pattern:
-            return 0.95  # Excellent clustering
-        elif region.biological_pattern == 'MIXED':
-            return 0.7   # Good clustering (mixed but related)
-        elif region.biological_pattern == 'NONE':
-            return 0.8   # Good clustering (first in region)
-        else:
-            return 0.3   # Poor clustering (different pattern)
-    
-    def _update_allocation_statistics(self, metadata: Dict[str, Any]) -> None:
-        """Update allocation performance statistics."""
-        self.indexing_statistics['total_allocations'] += 1
-        
-        if not metadata.get('collision_resolved', False):
-            self.indexing_statistics['successful_allocations'] += 1
-        else:
-            self.indexing_statistics['collision_count'] += 1
-        
-        # Update average allocation time
-        total_time = (self.indexing_statistics['average_allocation_time_ms'] * 
-                     (self.indexing_statistics['total_allocations'] - 1) + 
-                     metadata['allocation_time_ms'])
-        self.indexing_statistics['average_allocation_time_ms'] = total_time / self.indexing_statistics['total_allocations']
-        
-        # Update utilization
-        self.indexing_statistics['address_space_utilization'] = len(self.allocated_addresses) / self.address_space_size
-        
-        # Update clustering quality
-        if hasattr(self, '_last_clustering_quality'):
-            total_quality = (self._last_clustering_quality * (self.indexing_statistics['total_allocations'] - 1) + 
-                           metadata['clustering_achieved'])
-            self.indexing_statistics['biological_clustering_quality'] = total_quality / self.indexing_statistics['total_allocations']
-        else:
-            self.indexing_statistics['biological_clustering_quality'] = metadata['clustering_achieved']
-        
-        self._last_clustering_quality = self.indexing_statistics['biological_clustering_quality']
-    
-    def _start_background_optimization(self) -> None:
-        """Start background optimization thread."""
-        if self.optimization_thread is None or not self.optimization_thread.is_alive():
-            self.optimization_running = True
-            self.optimization_thread = threading.Thread(
-                target=self._background_optimization_worker,
-                daemon=True
-            )
-            self.optimization_thread.start()
-            logger.info("Background optimization thread started")
-    
-    def _background_optimization_worker(self) -> None:
-        """Background worker for continuous address space optimization."""
-        while self.optimization_running:
-            try:
-                time.sleep(30)  # Optimize every 30 seconds
-                
-                if not self.optimization_running:
-                    break
-                
-                # Check if optimization is needed
-                if self._should_optimize():
-                    logger.debug("Performing background optimization...")
-                    
-                    # Identify regions needing optimization
-                    optimization_candidates = self._identify_optimization_candidates()
-                    
-                    if optimization_candidates:
-                        # Optimize up to 3 regions per cycle
-                        self.optimize_address_space(optimization_candidates[:3])
-                
-            except Exception as e:
-                logger.warning(f"Background optimization error: {e}")
-                time.sleep(60)  # Wait longer after error
-    
-    def _should_optimize(self) -> bool:
-        """Determine if background optimization should run."""
-        # Check collision rate
-        collision_rate = self.indexing_statistics['collision_count'] / max(1, self.indexing_statistics['total_allocations'])
-        if collision_rate > 0.1:  # >10% collision rate
-            return True
-        
-        # Check clustering quality
-        if self.indexing_statistics['biological_clustering_quality'] < 0.7:
-            return True
-        
-        # Check if any region has high density
-        for region in self.address_regions.values():
-            if region.density > 0.5:  # >50% density
-                return True
-        
-        return False
-    
-    def _identify_optimization_candidates(self) -> List[int]:
-        """Identify regions that would benefit from optimization."""
-        candidates = []
-        
-        for region_id, region in self.address_regions.items():
-            priority_score = 0.0
-            
-            # High density penalty
-            if region.density > 0.1:
-                priority_score += region.density * 10
-            
-            # High collision penalty
-            if region.collision_count > 10:
-                priority_score += region.collision_count * 0.1
-            
-            # Low clustering quality penalty
-            if region.biological_pattern == 'MIXED':
-                priority_score += 5.0
-            
-            # Time since last optimization
-            time_since_optimization = time.time() - region.last_optimized
-            if time_since_optimization > 3600:  # 1 hour
-                priority_score += time_since_optimization / 3600
-            
-            region.optimization_priority = priority_score
-            
-            if priority_score > 1.0:
-                candidates.append(region_id)
-        
-        # Sort by priority (highest first)
-        candidates.sort(key=lambda rid: self.address_regions[rid].optimization_priority, reverse=True)
-        
-        return candidates
-    
-    def _analyze_current_distribution(self) -> Dict[str, Any]:
-        """Analyze current address space distribution."""
-        metrics = {}
-        
-        # Basic metrics
-        total_allocated = len(self.allocated_addresses)
-        total_regions = len(self.address_regions)
-        
-        # Density analysis
-        densities = [region.density for region in self.address_regions.values()]
-        metrics['average_density'] = np.mean(densities) if densities else 0
-        metrics['density_variance'] = np.var(densities) if densities else 0
-        
-        # Collision analysis
-        total_collisions = sum(len(collisions) for collisions in self.collision_map.values())
-        metrics['collision_rate'] = total_collisions / max(1, total_allocated)
-        
-        # Biological clustering
-        metrics['biological_clustering'] = self._analyze_biological_clustering()
-        
-        # Distribution quality
-        metrics['distribution_quality'] = self._calculate_distribution_uniformity()
-        
-        return metrics
-    
-    def _optimize_single_region(self, region_id: int, goals: Dict[str, float]) -> Dict[str, Any]:
-        """Optimize a single address region."""
-        if region_id not in self.address_regions:
-            return {'collisions_resolved': 0}
-        
-        region = self.address_regions[region_id]
-        
-        # Find addresses in this region
-        region_addresses = [addr for addr in self.allocated_addresses 
-                          if region.start_address <= addr <= region.end_address]
-        
-        collisions_resolved = 0
-        
-        # Resolve collisions in this region
-        for address in region_addresses:
-            if address in self.collision_map and len(self.collision_map[address]) > 0:
-                # Try to relocate colliding records
-                success = self._relocate_colliding_records(address, region_id)
-                if success:
-                    collisions_resolved += len(self.collision_map[address])
-                    del self.collision_map[address]
-        
-        # Update region optimization timestamp
-        region.last_optimized = time.time()
-        
-        return {'collisions_resolved': collisions_resolved}
-    
-    def _rebalance_global_distribution(self) -> None:
-        """Rebalance address distribution across the entire address space."""
-        # Calculate target density
-        total_allocated = len(self.allocated_addresses)
-        num_active_regions = len([r for r in self.address_regions.values() if r.record_count > 0])
-        
-        if num_active_regions == 0:
-            return
-        
-        target_density = total_allocated / (num_active_regions * self.region_size)
-        
-        # Identify over-dense and under-dense regions
-        over_dense_regions = []
-        under_dense_regions = []
-        
-        for region_id, region in self.address_regions.items():
-            if region.density > target_density * 2:  # More than 2x target
-                over_dense_regions.append(region_id)
-            elif region.density < target_density * 0.5:  # Less than 0.5x target
-                under_dense_regions.append(region_id)
-        
-        # Migrate records from over-dense to under-dense regions
-        migrations_performed = 0
-        for over_dense_id in over_dense_regions[:5]:  # Limit migrations per cycle
-            if under_dense_regions and migrations_performed < 10:
-                target_region_id = under_dense_regions[0]
-                success = self._migrate_region_records(over_dense_id, target_region_id, 5)
-                if success:
-                    migrations_performed += 5
-                    under_dense_regions.pop(0)  # Remove if now adequately dense
-    
-    def _calculate_performance_improvement(self, before: Dict, after: Dict) -> float:
-        """Calculate performance improvement percentage."""
-        improvements = []
-        
-        # Collision rate improvement
-        if before.get('collision_rate', 0) > 0:
-            collision_improvement = ((before['collision_rate'] - after.get('collision_rate', 0)) / 
-                                   before['collision_rate'] * 100)
-            improvements.append(collision_improvement)
-        
-        # Clustering quality improvement
-        clustering_improvement = ((after.get('biological_clustering', 0) - 
-                                 before.get('biological_clustering', 0)) * 100)
-        improvements.append(clustering_improvement)
-        
-        # Distribution quality improvement
-        distribution_improvement = ((after.get('distribution_quality', 0) - 
-                                   before.get('distribution_quality', 0)) * 100)
-        improvements.append(distribution_improvement)
-        
-        return np.mean(improvements) if improvements else 0.0
-    
-    def _estimate_memory_usage(self) -> float:
-        """Estimate current memory usage in MB."""
-        # Rough estimation based on data structures
-        allocated_addresses_size = len(self.allocated_addresses) * 8  # 8 bytes per int
-        regions_size = len(self.address_regions) * 200  # ~200 bytes per region
-        collision_map_size = sum(len(v) for v in self.collision_map.values()) * 8
-        patterns_size = sum(len(str(v)) for v in self.pattern_distributions.values())
-        
-        total_bytes = allocated_addresses_size + regions_size + collision_map_size + patterns_size
-        return total_bytes / (1024 * 1024)  # Convert to MB
-    
-    def _generate_optimization_recommendations(self, metrics: Dict, goals: Dict) -> List[str]:
-        """Generate optimization recommendations based on current metrics."""
-        recommendations = []
-        
-        collision_rate = metrics.get('collision_rate', 0)
-        clustering_quality = metrics.get('biological_clustering', 0)
-        distribution_quality = metrics.get('distribution_quality', 0)
-        
-        if collision_rate > goals.get('collision_rate_target', 0.05):
-            recommendations.append(f"HIGH_COLLISION_RATE: {collision_rate:.3f} > {goals['collision_rate_target']:.3f} - Consider increasing address space or improving hash function")
-        
-        if clustering_quality < goals.get('clustering_quality_target', 0.85):
-            recommendations.append(f"LOW_CLUSTERING_QUALITY: {clustering_quality:.3f} < {goals['clustering_quality_target']:.3f} - Improve biological feature mapping")
-        
-        if distribution_quality < goals.get('distribution_uniformity_target', 0.9):
-            recommendations.append(f"POOR_DISTRIBUTION: {distribution_quality:.3f} < {goals['distribution_uniformity_target']:.3f} - Rebalance address allocation strategy")
-        
-        # Check for hotspots
-        high_density_regions = len([r for r in self.address_regions.values() if r.density > 0.1])
-        if high_density_regions > len(self.address_regions) * 0.1:
-            recommendations.append(f"ADDRESS_HOTSPOTS: {high_density_regions} high-density regions detected - Consider defragmentation")
-        
-        if not recommendations:
-            recommendations.append("OPTIMAL_PERFORMANCE: Address space is well-optimized")
-        
-        return recommendations
-    
-    def _analyze_biological_clustering(self) -> float:
-        """Analyze quality of biological clustering."""
-        if not self.pattern_distributions:
-            return 0.0
-        
-        clustering_scores = []
-        
-        for pattern, data in self.pattern_distributions.items():
-            if data['count'] == 0:
-                continue
-            
-            # Calculate how well this pattern is clustered
-            pattern_regions = len(data['regions'])
-            total_records = data['count']
-            
-            # Ideal clustering: few regions, many records per region
-            if pattern_regions > 0:
-                records_per_region = total_records / pattern_regions
-                # Score based on concentration (more records per region = better)
-                clustering_score = min(1.0, records_per_region / 10.0)  # Normalize to 10 records per region
-                clustering_scores.append(clustering_score)
-        
-        return np.mean(clustering_scores) if clustering_scores else 0.0
-    
-    def _calculate_distribution_uniformity(self) -> float:
-        """Calculate uniformity of address distribution."""
-        if not self.address_regions:
-            return 0.0
-        
-        densities = [region.density for region in self.address_regions.values()]
-        
-        if not densities:
-            return 0.0
-        
-        # Calculate coefficient of variation (lower = more uniform)
-        mean_density = np.mean(densities)
-        if mean_density == 0:
-            return 1.0  # All regions empty = perfectly uniform
-        
-        cv = np.std(densities) / mean_density
-        
-        # Convert to uniformity score (1 = perfectly uniform, 0 = very non-uniform)
-        uniformity = 1.0 / (1.0 + cv)
-        
-        return uniformity
-    
-    def _calculate_address_entropy(self) -> float:
-        """Calculate entropy of address distribution."""
-        if not self.address_regions:
-            return 0.0
-        
-        # Get region record counts
-        counts = [region.record_count for region in self.address_regions.values()]
-        total_records = sum(counts)
-        
-        if total_records == 0:
-            return 0.0
-        
-        # Calculate probabilities
-        probabilities = [count / total_records for count in counts if count > 0]
-        
-        # Calculate entropy
-        entropy = -sum(p * np.log2(p) for p in probabilities if p > 0)
-        
-        # Normalize by maximum possible entropy
-        max_entropy = np.log2(len([c for c in counts if c > 0]))
-        
-        return entropy / max_entropy if max_entropy > 0 else 0.0
-    
-    def _identify_collision_hotspots(self) -> List[Dict[str, Any]]:
-        """Identify addresses with high collision rates."""
-        hotspots = []
-        
-        for address, collisions in self.collision_map.items():
-            if len(collisions) > 5:  # More than 5 collisions
-                region_id = address // self.region_size
-                hotspots.append({
-                    'address': address,
-                    'collision_count': len(collisions),
-                    'region_id': region_id,
-                    'region_density': self.address_regions.get(region_id, {}).density if region_id in self.address_regions else 0
-                })
-        
-        # Sort by collision count (highest first)
-        hotspots.sort(key=lambda x: x['collision_count'], reverse=True)
-        
-        return hotspots[:10]  # Return top 10 hotspots
-    
-    def _calculate_collision_resolution_efficiency(self) -> float:
-        """Calculate efficiency of collision resolution."""
-        total_collisions = sum(len(collisions) for collisions in self.collision_map.values())
-        total_allocations = self.indexing_statistics['total_allocations']
-        
-        if total_allocations == 0:
-            return 1.0
-        
-        # Efficiency = 1 - (collisions / allocations)
-        efficiency = 1.0 - (total_collisions / total_allocations)
-        
-        return max(0.0, efficiency)
-    
-    def _analyze_pattern_distribution(self) -> Dict[str, Any]:
-        """Analyze distribution of biological patterns."""
-        distribution = {}
-        
-        total_records = sum(data['count'] for data in self.pattern_distributions.values())
-        
-        for pattern, data in self.pattern_distributions.items():
-            if total_records > 0:
-                percentage = (data['count'] / total_records) * 100
-                avg_quality = np.mean(self.quality_distributions.get(pattern, [0]))
-                
-                distribution[pattern] = {
-                    'count': data['count'],
-                    'percentage': percentage,
-                    'regions': len(data['regions']),
-                    'average_quality': avg_quality,
-                    'clustering_factor': data['count'] / len(data['regions']) if data['regions'] else 0
-                }
-        
-        return distribution
-    
-    def _analyze_pattern_separation(self) -> float:
-        """Analyze how well different patterns are separated."""
-        if len(self.pattern_distributions) < 2:
-            return 1.0  # Perfect separation if only one pattern
-        
-        separation_scores = []
-        
-        patterns = list(self.pattern_distributions.keys())
-        for i, pattern1 in enumerate(patterns):
-            for pattern2 in patterns[i+1:]:
-                # Calculate overlap between pattern regions
-                regions1 = self.pattern_distributions[pattern1]['regions']
-                regions2 = self.pattern_distributions[pattern2]['regions']
-                
-                overlap = len(regions1.intersection(regions2))
-                total_regions = len(regions1.union(regions2))
-                
-                if total_regions > 0:
-                    separation = 1.0 - (overlap / total_regions)
-                    separation_scores.append(separation)
-        
-        return np.mean(separation_scores) if separation_scores else 1.0
-    
-    def _generate_analysis_recommendations(self, collision_rate: float, clustering_quality: float, 
-                                         uniformity: float, hotspot_count: int) -> List[str]:
-        """Generate recommendations based on distribution analysis."""
-        recommendations = []
-        
-        if collision_rate > 0.1:
-            recommendations.append("HIGH_COLLISION_RATE: Consider expanding address space or improving hash distribution")
-        
-        if clustering_quality < 0.7:
-            recommendations.append("POOR_BIOLOGICAL_CLUSTERING: Optimize biological feature mapping and region allocation")
-        
-        if uniformity < 0.8:
-            recommendations.append("UNEVEN_DISTRIBUTION: Implement load balancing across address regions")
-        
-        if hotspot_count > 10:
-            recommendations.append("MULTIPLE_HOTSPOTS: Consider address space defragmentation and rebalancing")
-        
-        # Performance recommendations
-        if collision_rate < 0.05 and clustering_quality > 0.85 and uniformity > 0.9:
-            recommendations.append("EXCELLENT_PERFORMANCE: Address space is optimally configured")
-        elif collision_rate < 0.1 and clustering_quality > 0.7:
-            recommendations.append("GOOD_PERFORMANCE: Minor optimizations may provide incremental improvements")
-        
-        return recommendations
-    
-    # Collision resolution methods
-    def _linear_probing_resolution(self, address: int) -> int:
-        """Resolve collision using linear probing."""
-        probe_address = address
-        probe_count = 0
-        
-        while probe_address in self.allocated_addresses and probe_count < 1000:
-            probe_address = (probe_address + 1) % self.address_space_size
-            probe_count += 1
-        
-        if probe_count >= 1000:
-            raise RuntimeError("Linear probing failed to find free address")
-        
-        return probe_address
-    
-    def _quadratic_probing_resolution(self, address: int) -> int:
-        """Resolve collision using quadratic probing."""
-        probe_address = address
-        probe_count = 0
-        
-        while probe_address in self.allocated_addresses and probe_count < 100:
-            probe_count += 1
-            probe_address = (address + probe_count * probe_count) % self.address_space_size
-        
-        if probe_count >= 100:
-            raise RuntimeError("Quadratic probing failed to find free address")
-        
-        return probe_address
-    
-    def _double_hashing_resolution(self, address: int, request: AddressAllocationRequest) -> int:
-        """Resolve collision using double hashing."""
-        # Second hash function
-        bio_data = json.dumps(request.biological_characteristics, sort_keys=True)
-        second_hash = int(hashlib.md5(bio_data.encode()).hexdigest()[:8], 16)
-        step_size = (second_hash % 997) + 1  # Ensure step size is not 0
-        
-        probe_address = address
-        probe_count = 0
-        
-        while probe_address in self.allocated_addresses and probe_count < 1000:
-            probe_address = (probe_address + step_size) % self.address_space_size
-            probe_count += 1
-        
-        if probe_count >= 1000:
-            raise RuntimeError("Double hashing failed to find free address")
-        
-        return probe_address
-    
-    def _biological_rehashing_resolution(self, address: int, request: AddressAllocationRequest) -> int:
-        """Resolve collision using biological characteristic rehashing."""
-        # Create modified biological characteristics for rehashing
-        modified_chars = request.biological_characteristics.copy()
-        
-        for attempt in range(10):
-            # Slightly modify characteristics to generate new address
-            modified_chars['_collision_attempt'] = attempt
-            
-            bio_data = json.dumps(modified_chars, sort_keys=True)
-            new_hash = int(hashlib.sha256(bio_data.encode()).hexdigest()[:12], 16)
-            new_address = new_hash % self.address_space_size
-            
-            if new_address not in self.allocated_addresses:
-                return new_address
-        
-        # Fallback to linear probing if biological rehashing fails
-        return self._linear_probing_resolution(address)
-    
-    # Address selection strategies
-    def _select_uniform_distribution_address(self, candidates: List[int]) -> int:
-        """Select address that promotes uniform distribution."""
-        best_address = candidates[0]
-        lowest_density = float('inf')
-        
-        for address in candidates:
-            region_id = address // self.region_size
-            
-            if region_id in self.address_regions:
-                density = self.address_regions[region_id].density
-                if density < lowest_density:
-                    lowest_density = density
-                    best_address = address
-            else:
-                # New region has zero density - prefer this
-                return address
-        
-        return best_address
-    
-    def _select_biological_clustering_address(self, candidates: List[int], request: AddressAllocationRequest) -> int:
-        """Select address that maximizes biological clustering."""
-        pattern = request.biological_characteristics.get('pattern_class', 'UNKNOWN')
-        best_address = candidates[0]
-        best_clustering_score = 0.0
-        
-        for address in candidates:
-            region_id = address // self.region_size
-            
-            if region_id in self.address_regions:
-                region = self.address_regions[region_id]
-                
-                # Score based on pattern matching
-                if region.biological_pattern == pattern:
-                    clustering_score = 1.0
-                elif region.biological_pattern == 'MIXED':
-                    clustering_score = 0.7
-                elif region.biological_pattern == 'NONE':
-                    clustering_score = 0.8
-                else:
-                    clustering_score = 0.2
-                
-                if clustering_score > best_clustering_score:
-                    best_clustering_score = clustering_score
-                    best_address = address
-        
-        return best_address
-    
-    def _select_hybrid_optimization_address(self, candidates: List[int], request: AddressAllocationRequest) -> int:
-        """Select address balancing distribution and clustering."""
-        pattern = request.biological_characteristics.get('pattern_class', 'UNKNOWN')
-        best_address = candidates[0]
-        best_score = 0.0
-        
-        for address in candidates:
-            region_id = address // self.region_size
-            
-            if region_id in self.address_regions:
-                region = self.address_regions[region_id]
-                
-                # Distribution score (lower density = better)
-                distribution_score = 1.0 - min(1.0, region.density * 10)
-                
-                # Clustering score
-                if region.biological_pattern == pattern:
-                    clustering_score = 1.0
-                elif region.biological_pattern == 'MIXED':
-                    clustering_score = 0.7
-                elif region.biological_pattern == 'NONE':
-                    clustering_score = 0.8
-                else:
-                    clustering_score = 0.2
-                
-                # Hybrid score (60% distribution, 40% clustering)
-                hybrid_score = distribution_score * 0.6 + clustering_score * 0.4
-                
-                if hybrid_score > best_score:
-                    best_score = hybrid_score
-                    best_address = address
-            else:
-                # New region gets high score
-                return address
-        
-        return best_address
-    
-    def _select_adaptive_address(self, candidates: List[int], request: AddressAllocationRequest) -> int:
-        """Select address using adaptive strategy based on system state."""
-        # Adapt strategy based on current system metrics
-        collision_rate = self.indexing_statistics['collision_count'] / max(1, self.indexing_statistics['total_allocations'])
-        clustering_quality = self.indexing_statistics['biological_clustering_quality']
-        
-        if collision_rate > 0.1:
-            # High collision rate - prioritize distribution
-            return self._select_uniform_distribution_address(candidates)
-        elif clustering_quality < 0.7:
-            # Poor clustering - prioritize biological clustering
-            return self._select_biological_clustering_address(candidates, request)
-        else:
-            # Balanced state - use hybrid approach
-            return self._select_hybrid_optimization_address(candidates, request)
-    
-    # Advanced optimization methods
-    def _analyze_fragmentation(self) -> Dict[str, Any]:
-        """Analyze address space fragmentation."""
-        if not self.allocated_addresses:
-            return {'fragmentation_level': 0.0}
-        
-        # Convert to sorted list for gap analysis
-        sorted_addresses = sorted(self.allocated_addresses)
-        
-        # Calculate gaps between consecutive addresses
-        gaps = []
-        for i in range(1, len(sorted_addresses)):
-            gap = sorted_addresses[i] - sorted_addresses[i-1] - 1
-            if gap > 0:
-                gaps.append(gap)
-        
-        # Fragmentation metrics
-        total_gaps = sum(gaps)
-        num_gaps = len(gaps)
-        avg_gap_size = np.mean(gaps) if gaps else 0
-        max_gap_size = max(gaps) if gaps else 0
-        
-        # Calculate fragmentation level
-        address_range = max(sorted_addresses) - min(sorted_addresses) if sorted_addresses else 0
-        fragmentation_level = total_gaps / max(1, address_range)
-        
-        return {
-            'fragmentation_level': fragmentation_level,
-            'total_gaps': total_gaps,
-            'num_gaps': num_gaps,
-            'average_gap_size': avg_gap_size,
-            'max_gap_size': max_gap_size,
-            'address_range': address_range
-        }
-    
-    def _create_defragmentation_plan(self, aggressive: bool, preserve_clustering: bool) -> Dict[str, Any]:
-        """Create defragmentation execution plan."""
-        plan = {
-            'move_operations': [],
-            'estimated_time_ms': 0,
-            'addresses_affected': 0
-        }
-        
-        if not self.allocated_addresses:
-            return plan
-        
-        sorted_addresses = sorted(self.allocated_addresses)
-        target_address = sorted_addresses[0]
-        
-        for i, current_address in enumerate(sorted_addresses):
-            if current_address != target_address:
-                # Need to move this address
-                plan['move_operations'].append({
-                    'source_address': current_address,
-                    'target_address': target_address,
-                    'preserve_clustering': preserve_clustering
-                })
-                plan['addresses_affected'] += 1
-            
-            target_address += 1
-            
-            # Limit operations in non-aggressive mode
-            if not aggressive and len(plan['move_operations']) >= 100:
-                break
-        
-        plan['estimated_time_ms'] = len(plan['move_operations']) * 0.1  # Estimate 0.1ms per move
-        
-        return plan
-    
-    def _execute_address_move(self, source: int, target: int, preserve_clustering: bool) -> bool:
-        """Execute a single address move operation."""
-        try:
-            if target in self.allocated_addresses:
-                return False  # Target already occupied
-            
-            # Update allocated addresses set
-            self.allocated_addresses.remove(source)
-            self.allocated_addresses.add(target)
-            
-            # Update region statistics
-            source_region_id = source // self.region_size
-            target_region_id = target // self.region_size#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Revolutionary Address Indexing System
 Patent Pending - Michael Derrick Jagneaux
@@ -1491,3 +745,780 @@ class RevolutionaryAddressIndexer:
             self.address_regions[region_id] = AddressSpaceRegion(
                 start_address=start_address,
                 end_address=end_address,
+                record_count=0,
+                density=0.0,
+                biological_pattern='NONE',
+                average_quality=0.0,
+                access_frequency=0,
+                collision_count=0,
+                optimization_priority=0.0,
+                last_optimized=time.time()
+            
+            )
+        
+        # Update region statistics
+        region = self.address_regions[region_id]
+        region.record_count += 1
+        region.density = region.record_count / self.region_size
+        
+        # Update biological pattern
+        pattern = request.biological_characteristics.get('pattern_class', 'UNKNOWN')
+        if region.biological_pattern == 'NONE':
+            region.biological_pattern = pattern
+        elif region.biological_pattern != pattern:
+            region.biological_pattern = 'MIXED'
+        
+        # Update quality metrics
+        if region.record_count == 1:
+            region.average_quality = request.quality_score
+        else:
+            region.average_quality = ((region.average_quality * (region.record_count - 1) + 
+                                     request.quality_score) / region.record_count)
+        
+        region.access_frequency += 1
+        
+        # Update pattern distributions
+        if pattern not in self.pattern_distributions:
+            self.pattern_distributions[pattern] = {
+                'count': 0,
+                'regions': set(),
+                'average_quality': 0.0,
+                'addresses': []
+            }
+        
+        self.pattern_distributions[pattern]['count'] += 1
+        self.pattern_distributions[pattern]['regions'].add(region_id)
+        self.pattern_distributions[pattern]['addresses'].append(address)
+        
+        # Update quality distribution
+        self.quality_distributions[pattern].append(request.quality_score)
+    
+    def _assess_clustering_quality(self, address: int, request: AddressAllocationRequest) -> float:
+        """Assess how well the allocated address preserves biological clustering."""
+        pattern = request.biological_characteristics.get('pattern_class', 'UNKNOWN')
+        region_id = address // self.region_size
+        
+        if region_id not in self.address_regions:
+            return 0.5  # Neutral quality for new regions
+        
+        region = self.address_regions[region_id]
+        
+        # Check if pattern matches region's dominant pattern
+        if region.biological_pattern == pattern:
+            return 0.95  # Excellent clustering
+        elif region.biological_pattern == 'MIXED':
+            return 0.7   # Good clustering (mixed but related)
+        elif region.biological_pattern == 'NONE':
+            return 0.8   # Good clustering (first in region)
+        else:
+            return 0.3   # Poor clustering (different pattern)
+    
+    def _update_allocation_statistics(self, metadata: Dict[str, Any]) -> None:
+        """Update allocation performance statistics."""
+        self.indexing_statistics['total_allocations'] += 1
+        
+        if not metadata.get('collision_resolved', False):
+            self.indexing_statistics['successful_allocations'] += 1
+        else:
+            self.indexing_statistics['collision_count'] += 1
+        
+        # Update average allocation time
+        total_time = (self.indexing_statistics['average_allocation_time_ms'] * 
+                     (self.indexing_statistics['total_allocations'] - 1) + 
+                     metadata['allocation_time_ms'])
+        self.indexing_statistics['average_allocation_time_ms'] = total_time / self.indexing_statistics['total_allocations']
+        
+        # Update utilization
+        self.indexing_statistics['address_space_utilization'] = len(self.allocated_addresses) / self.address_space_size
+        
+        # Update clustering quality
+        if hasattr(self, '_last_clustering_quality'):
+            total_quality = (self._last_clustering_quality * (self.indexing_statistics['total_allocations'] - 1) + 
+                           metadata['clustering_achieved'])
+            self.indexing_statistics['biological_clustering_quality'] = total_quality / self.indexing_statistics['total_allocations']
+        else:
+            self.indexing_statistics['biological_clustering_quality'] = metadata['clustering_achieved']
+        
+        self._last_clustering_quality = self.indexing_statistics['biological_clustering_quality']
+    
+    def _start_background_optimization(self) -> None:
+        """Start background optimization thread."""
+        if self.optimization_thread is None or not self.optimization_thread.is_alive():
+            self.optimization_running = True
+            self.optimization_thread = threading.Thread(
+                target=self._background_optimization_worker,
+                daemon=True
+            )
+            self.optimization_thread.start()
+            logger.info("Background optimization thread started")
+    
+    def _background_optimization_worker(self) -> None:
+        """Background worker for continuous address space optimization."""
+        while self.optimization_running:
+            try:
+                time.sleep(30)  # Optimize every 30 seconds
+                
+                if not self.optimization_running:
+                    break
+                
+                # Check if optimization is needed
+                if self._should_optimize():
+                    logger.debug("Performing background optimization...")
+                    
+                    # Identify regions needing optimization
+                    optimization_candidates = self._identify_optimization_candidates()
+                    
+                    if optimization_candidates:
+                        # Optimize up to 3 regions per cycle
+                        self.optimize_address_space(optimization_candidates[:3])
+                
+            except Exception as e:
+                logger.warning(f"Background optimization error: {e}")
+                time.sleep(60)  # Wait longer after error
+    
+    def _should_optimize(self) -> bool:
+        """Determine if background optimization should run."""
+        # Check collision rate
+        collision_rate = self.indexing_statistics['collision_count'] / max(1, self.indexing_statistics['total_allocations'])
+        if collision_rate > 0.1:  # >10% collision rate
+            return True
+        
+        # Check clustering quality
+        if self.indexing_statistics['biological_clustering_quality'] < 0.7:
+            return True
+        
+        # Check if any region has high density
+        for region in self.address_regions.values():
+            if region.density > 0.5:  # >50% density
+                return True
+        
+        return False
+    
+    def _identify_optimization_candidates(self) -> List[int]:
+        """Identify regions that would benefit from optimization."""
+        candidates = []
+        
+        for region_id, region in self.address_regions.items():
+            priority_score = 0.0
+            
+            # High density penalty
+            if region.density > 0.1:
+                priority_score += region.density * 10
+            
+            # High collision penalty
+            if region.collision_count > 10:
+                priority_score += region.collision_count * 0.1
+            
+            # Low clustering quality penalty
+            if region.biological_pattern == 'MIXED':
+                priority_score += 5.0
+            
+            # Time since last optimization
+            time_since_optimization = time.time() - region.last_optimized
+            if time_since_optimization > 3600:  # 1 hour
+                priority_score += time_since_optimization / 3600
+            
+            region.optimization_priority = priority_score
+            
+            if priority_score > 1.0:
+                candidates.append(region_id)
+        
+        # Sort by priority (highest first)
+        candidates.sort(key=lambda rid: self.address_regions[rid].optimization_priority, reverse=True)
+        
+        return candidates
+    
+    def _analyze_current_distribution(self) -> Dict[str, Any]:
+        """Analyze current address space distribution."""
+        metrics = {}
+        
+        # Basic metrics
+        total_allocated = len(self.allocated_addresses)
+        total_regions = len(self.address_regions)
+        
+        # Density analysis
+        densities = [region.density for region in self.address_regions.values()]
+        metrics['average_density'] = np.mean(densities) if densities else 0
+        metrics['density_variance'] = np.var(densities) if densities else 0
+        
+        # Collision analysis
+        total_collisions = sum(len(collisions) for collisions in self.collision_map.values())
+        metrics['collision_rate'] = total_collisions / max(1, total_allocated)
+        
+        # Biological clustering
+        metrics['biological_clustering'] = self._analyze_biological_clustering()
+        
+        # Distribution quality
+        metrics['distribution_quality'] = self._calculate_distribution_uniformity()
+        
+        return metrics
+    
+    def _optimize_single_region(self, region_id: int, goals: Dict[str, float]) -> Dict[str, Any]:
+        """Optimize a single address region."""
+        if region_id not in self.address_regions:
+            return {'collisions_resolved': 0}
+        
+        region = self.address_regions[region_id]
+        
+        # Find addresses in this region
+        region_addresses = [addr for addr in self.allocated_addresses 
+                          if region.start_address <= addr <= region.end_address]
+        
+        collisions_resolved = 0
+        
+        # Resolve collisions in this region
+        for address in region_addresses:
+            if address in self.collision_map and len(self.collision_map[address]) > 0:
+                # Try to relocate colliding records
+                success = self._relocate_colliding_records(address, region_id)
+                if success:
+                    collisions_resolved += len(self.collision_map[address])
+                    del self.collision_map[address]
+        
+        # Update region optimization timestamp
+        region.last_optimized = time.time()
+        
+        return {'collisions_resolved': collisions_resolved}
+    
+    def _rebalance_global_distribution(self) -> None:
+        """Rebalance address distribution across the entire address space."""
+        # Calculate target density
+        total_allocated = len(self.allocated_addresses)
+        num_active_regions = len([r for r in self.address_regions.values() if r.record_count > 0])
+        
+        if num_active_regions == 0:
+            return
+        
+        target_density = total_allocated / (num_active_regions * self.region_size)
+        
+        # Identify over-dense and under-dense regions
+        over_dense_regions = []
+        under_dense_regions = []
+        
+        for region_id, region in self.address_regions.items():
+            if region.density > target_density * 2:  # More than 2x target
+                over_dense_regions.append(region_id)
+            elif region.density < target_density * 0.5:  # Less than 0.5x target
+                under_dense_regions.append(region_id)
+        
+        # Migrate records from over-dense to under-dense regions
+        migrations_performed = 0
+        for over_dense_id in over_dense_regions[:5]:  # Limit migrations per cycle
+            if under_dense_regions and migrations_performed < 10:
+                target_region_id = under_dense_regions[0]
+                success = self._migrate_region_records(over_dense_id, target_region_id, 5)
+                if success:
+                    migrations_performed += 5
+                    under_dense_regions.pop(0)  # Remove if now adequately dense
+    
+    def _calculate_performance_improvement(self, before: Dict, after: Dict) -> float:
+        """Calculate performance improvement percentage."""
+        improvements = []
+        
+        # Collision rate improvement
+        if before.get('collision_rate', 0) > 0:
+            collision_improvement = ((before['collision_rate'] - after.get('collision_rate', 0)) / 
+                                   before['collision_rate'] * 100)
+            improvements.append(collision_improvement)
+        
+        # Clustering quality improvement
+        clustering_improvement = ((after.get('biological_clustering', 0) - 
+                                 before.get('biological_clustering', 0)) * 100)
+        improvements.append(clustering_improvement)
+        
+        # Distribution quality improvement
+        distribution_improvement = ((after.get('distribution_quality', 0) - 
+                                   before.get('distribution_quality', 0)) * 100)
+        improvements.append(distribution_improvement)
+        
+        return np.mean(improvements) if improvements else 0.0
+    
+    def _estimate_memory_usage(self) -> float:
+        """Estimate current memory usage in MB."""
+        # Rough estimation based on data structures
+        allocated_addresses_size = len(self.allocated_addresses) * 8  # 8 bytes per int
+        regions_size = len(self.address_regions) * 200  # ~200 bytes per region
+        collision_map_size = sum(len(v) for v in self.collision_map.values()) * 8
+        patterns_size = sum(len(str(v)) for v in self.pattern_distributions.values())
+        
+        total_bytes = allocated_addresses_size + regions_size + collision_map_size + patterns_size
+        return total_bytes / (1024 * 1024)  # Convert to MB
+    
+    def _generate_optimization_recommendations(self, metrics: Dict, goals: Dict) -> List[str]:
+        """Generate optimization recommendations based on current metrics."""
+        recommendations = []
+        
+        collision_rate = metrics.get('collision_rate', 0)
+        clustering_quality = metrics.get('biological_clustering', 0)
+        distribution_quality = metrics.get('distribution_quality', 0)
+        
+        if collision_rate > goals.get('collision_rate_target', 0.05):
+            recommendations.append(f"HIGH_COLLISION_RATE: {collision_rate:.3f} > {goals['collision_rate_target']:.3f} - Consider increasing address space or improving hash function")
+        
+        if clustering_quality < goals.get('clustering_quality_target', 0.85):
+            recommendations.append(f"LOW_CLUSTERING_QUALITY: {clustering_quality:.3f} < {goals['clustering_quality_target']:.3f} - Improve biological feature mapping")
+        
+        if distribution_quality < goals.get('distribution_uniformity_target', 0.9):
+            recommendations.append(f"POOR_DISTRIBUTION: {distribution_quality:.3f} < {goals['distribution_uniformity_target']:.3f} - Rebalance address allocation strategy")
+        
+        # Check for hotspots
+        high_density_regions = len([r for r in self.address_regions.values() if r.density > 0.1])
+        if high_density_regions > len(self.address_regions) * 0.1:
+            recommendations.append(f"ADDRESS_HOTSPOTS: {high_density_regions} high-density regions detected - Consider defragmentation")
+        
+        if not recommendations:
+            recommendations.append("OPTIMAL_PERFORMANCE: Address space is well-optimized")
+        
+        return recommendations
+    
+    def _analyze_biological_clustering(self) -> float:
+        """Analyze quality of biological clustering."""
+        if not self.pattern_distributions:
+            return 0.0
+        
+        clustering_scores = []
+        
+        for pattern, data in self.pattern_distributions.items():
+            if data['count'] == 0:
+                continue
+            
+            # Calculate how well this pattern is clustered
+            pattern_regions = len(data['regions'])
+            total_records = data['count']
+            
+            # Ideal clustering: few regions, many records per region
+            if pattern_regions > 0:
+                records_per_region = total_records / pattern_regions
+                # Score based on concentration (more records per region = better)
+                clustering_score = min(1.0, records_per_region / 10.0)  # Normalize to 10 records per region
+                clustering_scores.append(clustering_score)
+        
+        return np.mean(clustering_scores) if clustering_scores else 0.0
+    
+    def _calculate_distribution_uniformity(self) -> float:
+        """Calculate uniformity of address distribution."""
+        if not self.address_regions:
+            return 0.0
+        
+        densities = [region.density for region in self.address_regions.values()]
+        
+        if not densities:
+            return 0.0
+        
+        # Calculate coefficient of variation (lower = more uniform)
+        mean_density = np.mean(densities)
+        if mean_density == 0:
+            return 1.0  # All regions empty = perfectly uniform
+        
+        cv = np.std(densities) / mean_density
+        
+        # Convert to uniformity score (1 = perfectly uniform, 0 = very non-uniform)
+        uniformity = 1.0 / (1.0 + cv)
+        
+        return uniformity
+    
+    def _calculate_address_entropy(self) -> float:
+        """Calculate entropy of address distribution."""
+        if not self.address_regions:
+            return 0.0
+        
+        # Get region record counts
+        counts = [region.record_count for region in self.address_regions.values()]
+        total_records = sum(counts)
+        
+        if total_records == 0:
+            return 0.0
+        
+        # Calculate probabilities
+        probabilities = [count / total_records for count in counts if count > 0]
+        
+        # Calculate entropy
+        entropy = -sum(p * np.log2(p) for p in probabilities if p > 0)
+        
+        # Normalize by maximum possible entropy
+        max_entropy = np.log2(len([c for c in counts if c > 0]))
+        
+        return entropy / max_entropy if max_entropy > 0 else 0.0
+    
+    def _identify_collision_hotspots(self) -> List[Dict[str, Any]]:
+        """Identify addresses with high collision rates."""
+        hotspots = []
+        
+        for address, collisions in self.collision_map.items():
+            if len(collisions) > 5:  # More than 5 collisions
+                region_id = address // self.region_size
+                hotspots.append({
+                    'address': address,
+                    'collision_count': len(collisions),
+                    'region_id': region_id,
+                    'region_density': self.address_regions.get(region_id, {}).density if region_id in self.address_regions else 0
+                })
+        
+        # Sort by collision count (highest first)
+        hotspots.sort(key=lambda x: x['collision_count'], reverse=True)
+        
+        return hotspots[:10]  # Return top 10 hotspots
+    
+    def _calculate_collision_resolution_efficiency(self) -> float:
+        """Calculate efficiency of collision resolution."""
+        total_collisions = sum(len(collisions) for collisions in self.collision_map.values())
+        total_allocations = self.indexing_statistics['total_allocations']
+        
+        if total_allocations == 0:
+            return 1.0
+        
+        # Efficiency = 1 - (collisions / allocations)
+        efficiency = 1.0 - (total_collisions / total_allocations)
+        
+        return max(0.0, efficiency)
+    
+    def _analyze_pattern_distribution(self) -> Dict[str, Any]:
+        """Analyze distribution of biological patterns."""
+        distribution = {}
+        
+        total_records = sum(data['count'] for data in self.pattern_distributions.values())
+        
+        for pattern, data in self.pattern_distributions.items():
+            if total_records > 0:
+                percentage = (data['count'] / total_records) * 100
+                avg_quality = np.mean(self.quality_distributions.get(pattern, [0]))
+                
+                distribution[pattern] = {
+                    'count': data['count'],
+                    'percentage': percentage,
+                    'regions': len(data['regions']),
+                    'average_quality': avg_quality,
+                    'clustering_factor': data['count'] / len(data['regions']) if data['regions'] else 0
+                }
+        
+        return distribution
+    
+    def _analyze_pattern_separation(self) -> float:
+        """Analyze how well different patterns are separated."""
+        if len(self.pattern_distributions) < 2:
+            return 1.0  # Perfect separation if only one pattern
+        
+        separation_scores = []
+        
+        patterns = list(self.pattern_distributions.keys())
+        for i, pattern1 in enumerate(patterns):
+            for pattern2 in patterns[i+1:]:
+                # Calculate overlap between pattern regions
+                regions1 = self.pattern_distributions[pattern1]['regions']
+                regions2 = self.pattern_distributions[pattern2]['regions']
+                
+                overlap = len(regions1.intersection(regions2))
+                total_regions = len(regions1.union(regions2))
+                
+                if total_regions > 0:
+                    separation = 1.0 - (overlap / total_regions)
+                    separation_scores.append(separation)
+        
+        return np.mean(separation_scores) if separation_scores else 1.0
+    
+    def _generate_analysis_recommendations(self, collision_rate: float, clustering_quality: float, 
+                                         uniformity: float, hotspot_count: int) -> List[str]:
+        """Generate recommendations based on distribution analysis."""
+        recommendations = []
+        
+        if collision_rate > 0.1:
+            recommendations.append("HIGH_COLLISION_RATE: Consider expanding address space or improving hash distribution")
+        
+        if clustering_quality < 0.7:
+            recommendations.append("POOR_BIOLOGICAL_CLUSTERING: Optimize biological feature mapping and region allocation")
+        
+        if uniformity < 0.8:
+            recommendations.append("UNEVEN_DISTRIBUTION: Implement load balancing across address regions")
+        
+        if hotspot_count > 10:
+            recommendations.append("MULTIPLE_HOTSPOTS: Consider address space defragmentation and rebalancing")
+        
+        # Performance recommendations
+        if collision_rate < 0.05 and clustering_quality > 0.85 and uniformity > 0.9:
+            recommendations.append("EXCELLENT_PERFORMANCE: Address space is optimally configured")
+        elif collision_rate < 0.1 and clustering_quality > 0.7:
+            recommendations.append("GOOD_PERFORMANCE: Minor optimizations may provide incremental improvements")
+        
+        return recommendations
+    
+    # Collision resolution methods
+    def _linear_probing_resolution(self, address: int) -> int:
+        """Resolve collision using linear probing."""
+        probe_address = address
+        probe_count = 0
+        
+        while probe_address in self.allocated_addresses and probe_count < 1000:
+            probe_address = (probe_address + 1) % self.address_space_size
+            probe_count += 1
+        
+        if probe_count >= 1000:
+            raise RuntimeError("Linear probing failed to find free address")
+        
+        return probe_address
+    
+    def _quadratic_probing_resolution(self, address: int) -> int:
+        """Resolve collision using quadratic probing."""
+        probe_address = address
+        probe_count = 0
+        
+        while probe_address in self.allocated_addresses and probe_count < 100:
+            probe_count += 1
+            probe_address = (address + probe_count * probe_count) % self.address_space_size
+        
+        if probe_count >= 100:
+            raise RuntimeError("Quadratic probing failed to find free address")
+        
+        return probe_address
+    
+    def _double_hashing_resolution(self, address: int, request: AddressAllocationRequest) -> int:
+        """Resolve collision using double hashing."""
+        # Second hash function
+        bio_data = json.dumps(request.biological_characteristics, sort_keys=True)
+        second_hash = int(hashlib.md5(bio_data.encode()).hexdigest()[:8], 16)
+        step_size = (second_hash % 997) + 1  # Ensure step size is not 0
+        
+        probe_address = address
+        probe_count = 0
+        
+        while probe_address in self.allocated_addresses and probe_count < 1000:
+            probe_address = (probe_address + step_size) % self.address_space_size
+            probe_count += 1
+        
+        if probe_count >= 1000:
+            raise RuntimeError("Double hashing failed to find free address")
+        
+        return probe_address
+    
+    def _biological_rehashing_resolution(self, address: int, request: AddressAllocationRequest) -> int:
+        """Resolve collision using biological characteristic rehashing."""
+        # Create modified biological characteristics for rehashing
+        modified_chars = request.biological_characteristics.copy()
+        
+        for attempt in range(10):
+            # Slightly modify characteristics to generate new address
+            modified_chars['_collision_attempt'] = attempt
+            
+            bio_data = json.dumps(modified_chars, sort_keys=True)
+            new_hash = int(hashlib.sha256(bio_data.encode()).hexdigest()[:12], 16)
+            new_address = new_hash % self.address_space_size
+            
+            if new_address not in self.allocated_addresses:
+                return new_address
+        
+        # Fallback to linear probing if biological rehashing fails
+        return self._linear_probing_resolution(address)
+    
+    # Address selection strategies
+    def _select_uniform_distribution_address(self, candidates: List[int]) -> int:
+        """Select address that promotes uniform distribution."""
+        best_address = candidates[0]
+        lowest_density = float('inf')
+        
+        for address in candidates:
+            region_id = address // self.region_size
+            
+            if region_id in self.address_regions:
+                density = self.address_regions[region_id].density
+                if density < lowest_density:
+                    lowest_density = density
+                    best_address = address
+            else:
+                # New region has zero density - prefer this
+                return address
+        
+        return best_address
+    
+    def _select_biological_clustering_address(self, candidates: List[int], request: AddressAllocationRequest) -> int:
+        """Select address that maximizes biological clustering."""
+        pattern = request.biological_characteristics.get('pattern_class', 'UNKNOWN')
+        best_address = candidates[0]
+        best_clustering_score = 0.0
+        
+        for address in candidates:
+            region_id = address // self.region_size
+            
+            if region_id in self.address_regions:
+                region = self.address_regions[region_id]
+                
+                # Score based on pattern matching
+                if region.biological_pattern == pattern:
+                    clustering_score = 1.0
+                elif region.biological_pattern == 'MIXED':
+                    clustering_score = 0.7
+                elif region.biological_pattern == 'NONE':
+                    clustering_score = 0.8
+                else:
+                    clustering_score = 0.2
+                
+                if clustering_score > best_clustering_score:
+                    best_clustering_score = clustering_score
+                    best_address = address
+        
+        return best_address
+    
+    def _select_hybrid_optimization_address(self, candidates: List[int], request: AddressAllocationRequest) -> int:
+        """Select address balancing distribution and clustering."""
+        pattern = request.biological_characteristics.get('pattern_class', 'UNKNOWN')
+        best_address = candidates[0]
+        best_score = 0.0
+        
+        for address in candidates:
+            region_id = address // self.region_size
+            
+            if region_id in self.address_regions:
+                region = self.address_regions[region_id]
+                
+                # Distribution score (lower density = better)
+                distribution_score = 1.0 - min(1.0, region.density * 10)
+                
+                # Clustering score
+                if region.biological_pattern == pattern:
+                    clustering_score = 1.0
+                elif region.biological_pattern == 'MIXED':
+                    clustering_score = 0.7
+                elif region.biological_pattern == 'NONE':
+                    clustering_score = 0.8
+                else:
+                    clustering_score = 0.2
+                
+                # Hybrid score (60% distribution, 40% clustering)
+                hybrid_score = distribution_score * 0.6 + clustering_score * 0.4
+                
+                if hybrid_score > best_score:
+                    best_score = hybrid_score
+                    best_address = address
+            else:
+                # New region gets high score
+                return address
+        
+        return best_address
+    
+    def _select_adaptive_address(self, candidates: List[int], request: AddressAllocationRequest) -> int:
+        """Select address using adaptive strategy based on system state."""
+        # Adapt strategy based on current system metrics
+        collision_rate = self.indexing_statistics['collision_count'] / max(1, self.indexing_statistics['total_allocations'])
+        clustering_quality = self.indexing_statistics['biological_clustering_quality']
+        
+        if collision_rate > 0.1:
+            # High collision rate - prioritize distribution
+            return self._select_uniform_distribution_address(candidates)
+        elif clustering_quality < 0.7:
+            # Poor clustering - prioritize biological clustering
+            return self._select_biological_clustering_address(candidates, request)
+        else:
+            # Balanced state - use hybrid approach
+            return self._select_hybrid_optimization_address(candidates, request)
+    
+    # Advanced optimization methods
+    def _analyze_fragmentation(self) -> Dict[str, Any]:
+        """Analyze address space fragmentation."""
+        if not self.allocated_addresses:
+            return {'fragmentation_level': 0.0}
+        
+        # Convert to sorted list for gap analysis
+        sorted_addresses = sorted(self.allocated_addresses)
+        
+        # Calculate gaps between consecutive addresses
+        gaps = []
+        for i in range(1, len(sorted_addresses)):
+            gap = sorted_addresses[i] - sorted_addresses[i-1] - 1
+            if gap > 0:
+                gaps.append(gap)
+        
+        # Fragmentation metrics
+        total_gaps = sum(gaps)
+        num_gaps = len(gaps)
+        avg_gap_size = np.mean(gaps) if gaps else 0
+        max_gap_size = max(gaps) if gaps else 0
+        
+        # Calculate fragmentation level
+        address_range = max(sorted_addresses) - min(sorted_addresses) if sorted_addresses else 0
+        fragmentation_level = total_gaps / max(1, address_range)
+        
+        return {
+            'fragmentation_level': fragmentation_level,
+            'total_gaps': total_gaps,
+            'num_gaps': num_gaps,
+            'average_gap_size': avg_gap_size,
+            'max_gap_size': max_gap_size,
+            'address_range': address_range
+        }
+    
+    def _create_defragmentation_plan(self, aggressive: bool, preserve_clustering: bool) -> Dict[str, Any]:
+        """Create defragmentation execution plan."""
+        plan = {
+            'move_operations': [],
+            'estimated_time_ms': 0,
+            'addresses_affected': 0
+        }
+        
+        if not self.allocated_addresses:
+            return plan
+        
+        sorted_addresses = sorted(self.allocated_addresses)
+        target_address = sorted_addresses[0]
+        
+        for i, current_address in enumerate(sorted_addresses):
+            if current_address != target_address:
+                # Need to move this address
+                plan['move_operations'].append({
+                    'source_address': current_address,
+                    'target_address': target_address,
+                    'preserve_clustering': preserve_clustering
+                })
+                plan['addresses_affected'] += 1
+            
+            target_address += 1
+            
+            # Limit operations in non-aggressive mode
+            if not aggressive and len(plan['move_operations']) >= 100:
+                break
+        
+        plan['estimated_time_ms'] = len(plan['move_operations']) * 0.1  # Estimate 0.1ms per move
+        
+        return plan
+    
+    def _execute_address_move(self, source: int, target: int, preserve_clustering: bool) -> bool:
+        """Execute a single address move operation."""
+        try:
+            if target in self.allocated_addresses:
+                return False  # Target already occupied
+            
+            # Update allocated addresses set
+            self.allocated_addresses.remove(source)
+            self.allocated_addresses.add(target)
+            
+            # Update region statistics
+            source_region_id = source // self.region_size
+            target_region_id = target // self.region_size
+    
+            # Update source region statistics
+            if source_region_id in self.address_regions:
+                src_region = self.address_regions[source_region_id]
+                src_region.record_count = max(0, src_region.record_count - 1)
+                src_region.density = src_region.record_count / self.region_size
+    
+            # Ensure target region exists
+            if target_region_id not in self.address_regions:
+                self.address_regions[target_region_id] = AddressSpaceRegion(
+                    start_address=target_region_id * self.region_size,
+                    end_address=target_region_id * self.region_size + self.region_size - 1,
+                    record_count=0,
+                    density=0.0,
+                    biological_pattern='NONE',
+                    average_quality=0.0,
+                    access_frequency=0,
+                    collision_count=0,
+                    optimization_priority=0.0,
+                    last_optimized=time.time()
+                )
+    
+            tgt_region = self.address_regions[target_region_id]
+            tgt_region.record_count += 1
+            tgt_region.density = tgt_region.record_count / self.region_size
+    
+            return True
+        except Exception as e:
+            logger.error(f"Address move failed: {e}")
+            return False
+
