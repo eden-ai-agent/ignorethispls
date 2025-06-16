@@ -1,3 +1,31 @@
+#!/usr/bin/env python3
+"""Tests for the Revolutionary Address Generator."""
+
+import pytest
+import numpy as np
+import time
+import statistics
+import hashlib
+from typing import Dict, List, Any, Tuple, Optional
+from unittest.mock import Mock, patch, MagicMock
+from dataclasses import dataclass
+import scipy.stats as stats
+from collections import Counter, defaultdict
+
+from src.core.address_generator import (
+    RevolutionaryAddressGenerator,
+    AddressGenerationResult,
+    SimilarityAddressSet,
+    AddressComponents,
+    AddressValidationResult,
+)
+from src.core.fingerprint_processor import FingerprintCharacteristics
+from src.tests import TestConfig, TestDataGenerator, TestUtils
+
+
+class TestAddressGeneratorEarly:
+    """Initial portion of the address generator tests."""
+
     def test_concurrent_address_generation(self, address_generator, diverse_test_characteristics):
         """Test concurrent address generation capability."""
         import threading
