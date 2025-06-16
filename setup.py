@@ -13,7 +13,7 @@ import re
 
 # Read the contents of README file
 this_directory = Path(__file__).parent
-long_description = (this_directory / "README.md").read_text(encoding='utf-8')
+long_description = (this_directory / "readme.md").read_text(encoding='utf-8')
 
 # Read version from __init__.py
 def get_version():
