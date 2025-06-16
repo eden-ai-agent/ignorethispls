@@ -1,0 +1,35 @@
+# Revolutionary O(1) Fingerprint System - Python Dependencies
+# Patent Pending - Michael Derrick Jagneaux
+
+# Core Image Processing
+opencv-python==4.8.1.78
+opencv-contrib-python==4.8.1.78
+numpy==1.24.3
+Pillow==10.0.1
+scikit-image==0.21.0
+
+# Web Framework
+Flask==2.3.3
+Flask-CORS==4.0.0
+Flask-RESTful==0.3.10
+Werkzeug==2.3.7
+
+# Database (SQLite is built into Python, no need for PostgreSQL)
+sqlite3  # This is built-in, but listing for clarity
+
+# Scientific Computing
+scipy==1.11.4
+matplotlib==3.7.2
+pandas==2.0.3
+
+# Performance and Utilities
+psutil==5.9.5
+pyyaml==6.0.1
+python-dotenv==1.0.0
+
+# Development and Testing
+pytest==7.4.2
+pytest-cov==4.1.0
+
+# Production Server (Optional - remove gunicorn on Windows)
+# gunicorn==21.2.0  # Commented out for Windows compatibility

@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload Fingerprint - Revolutionary O(1) System</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <!-- Navigation Header -->
+    <nav class="navbar">
+        <div class="navbar-brand">
+            <i class="fas fa-fingerprint revolutionary-icon"></i>
+            <span class="brand-text">O(1) Fingerprint System</span>
+            <span class="patent-badge">PATENT PENDING</span>
+        </div>
+        <div class="navbar-nav">
+            <a href="/" class="nav-link"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
+            <a href="/upload" class="nav-link active"><i class="fas fa-cloud-upload-alt"></i> Upload</a>
+            <a href="/search" class="nav-link"><i class="fas fa-search"></i> Search</a>
+            <a href="/demo" class="nav-link"><i class="fas fa-rocket"></i> Demo</a>
+        </div>
+    </nav>
+
+    <!-- Upload Hero Section -->
+    <section class="upload-hero">
+        <div class="container">
+            <h1 class="page-title">Revolutionary Fingerprint Processing</h1>
+            <p class="page-subtitle">Experience instant characteristic extraction and O(1) address generation</p>
+        </div>
+    </section>
+
+    <!-- Main Upload Interface -->
+    <section class="upload-section">
+        <div class="container">
+            <div class="upload-grid">
+                <!-- Upload Area -->
+                <div class="upload-panel">
+                    <div class="upload-card">
+                        <div class="upload-header">
+                            <h3><i class="fas fa-fingerprint"></i> Upload Fingerprint</h3>
+                            <div class="upload-status" id="uploadStatus">
+                                <span class="status-text">Ready for upload</span>
+                            </div>
+                        </div>
+
+                        <!-- Drag & Drop Upload Zone -->
+                        <div class="upload-zone" id="uploadZone">
+                            <div class="upload-zone-content">
+                                <div class="upload-icon">
+                                    <i class="fas fa-cloud-upload-alt"></i>
+                                </div>
+                                <h4>Drag & Drop Fingerprint Image</h4>
+                                <p>Or click to browse files</p>
+                                <div class="upload-formats">
+                                    <span class="format-tag">JPG</span>
+                                    <span class="format-tag">PNG</span>
+                                    <span class="format-tag">TIF</span>
+                                    <span class="format-tag">BMP</span>
+                                </div>
+                            </div>
+                            <input type="file" id="fileInput" accept=".jpg,.jpeg,.png,.tif,.tiff,.bmp" style="display: none;">
+                        </div>
+
+                        <!-- File Preview -->
+                        <div class="file-preview-container" id="imagePreviewContainer" style="display: none;">
+                            <div class="file-preview">
+                                <img id="imagePreview" alt="Uploaded fingerprint preview">
+                                <div class="file-info">
+                                    <div class="file-name" id="imageFileName">filename.jpg</div>
+                                    <div class="file-size" id="imageSize">2.4 MB</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Upload Progress -->
+                        <div class="upload-progress-container" id="progressContainer" style="display: none;">
+                            <div class="progress-info">
+                                <span id="progressText">Uploading...</span>
+                                <span id="progressPercent">0%</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="progressFill"></div>
+                            </div>
+                        </div>
+
+                        <!-- Upload Options -->
+                        <div class="upload-options">
+                            <label class="checkbox-option">
+                                <input type="checkbox" id="storeInDatabase" checked>
+                                <span class="checkmark"></span>
+                                Store in O(1) database
+                            </label>
+                            <label class="checkbox-option">
+                                <input type="checkbox" id="enableRealTimeProcessing" checked>
+                                <span class="checkmark"></span>
+                                Real-time processing display
+                            </label>
+                        </div>
+
+                        <!-- Upload Button -->
+                        <button class="upload-btn" id="uploadBtn" disabled>
+                            <i class="fas fa-rocket"></i>
+                            Process with Revolutionary O(1) System
+                        </button>
+                    </div>
+
+                    <!-- Batch Upload Option -->
+                    <div class="batch-upload-card">
+                        <div class="batch-header">
+                            <h4><i class="fas fa-layer-group"></i> Batch Upload</h4>
+                            <span class="batch-status">Multiple files supported</span>
+                        </div>
+                        <div class="batch-upload-zone" id="batchUploadZone">
+                            <i class="fas fa-copy"></i>
+                            <p>Drop multiple fingerprints here</p>
+                            <small>Up to 50 files at once</small>
+                            <input type="file" id="batchFileInput" multiple accept=".jpg,.jpeg,.png,.tif,.tiff,.bmp" style="display: none;">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Processing Visualization -->
+                <div class="processing-panel">
+                    <div class="processing-card">
+                        <div class="processing-header">
+                            <h3><i class="fas fa-cogs"></i> Real-Time Processing</h3>
+                            <div class="processing-indicator" id="processingIndicator">
+                                <div class="pulse-dot"></div>
+                                <span>Awaiting upload</span>
+                            </div>
+                        </div>
+
+                        <!-- Processing Steps -->
+                        <div class="processing-steps" id="processingSteps">
+                            <div class="step-item" id="step1">
+                                <div class="step-icon"><i class="fas fa-upload"></i></div>
+                                <div class="step-content">
+                                    <div class="step-title">File Upload</div>
+                                    <div class="step-status">Waiting...</div>
+                                </div>
+                                <div class="step-timer">-</div>
+                            </div>
+                            <div class="step-item" id="step2">
+                                <div class="step-icon"><i class="fas fa-search"></i></div>
+                                <div class="step-content">
+                                    <div class="step-title">Characteristic Extraction</div>
+                                    <div class="step-status">Waiting...</div>
+                                </div>
+                                <div class="step-timer">-</div>
+                            </div>
+                            <div class="step-item" id="step3">
+                                <div class="step-icon"><i class="fas fa-fingerprint"></i></div>
+                                <div class="step-content">
+                                    <div class="step-title">Pattern Classification</div>
+                                    <div class="step-status">Waiting...</div>
+                                </div>
+                                <div class="step-timer">-</div>
+                            </div>
+                            <div class="step-item" id="step4">
+                                <div class="step-icon"><i class="fas fa-map-marker-alt"></i></div>
+                                <div class="step-content">
+                                    <div class="step-title">Address Generation</div>
+                                    <div class="step-status">Waiting...</div>
+                                </div>
+                                <div class="step-timer">-</div>
+                            </div>
+                            <div class="step-item" id="step5">
+                                <div class="step-icon"><i class="fas fa-database"></i></div>
+                                <div class="step-content">
+                                    <div class="step-title">Database Storage</div>
+                                    <div class="step-status">Waiting...</div>
+                                </div>
+                                <div class="step-timer">-</div>
+                            </div>
+                        </div>
+
+                        <!-- Processing Visualization -->
+                        <div class="processing-visualization" id="processingVisualization" style="display: none;">
+                            <canvas id="processingCanvas" width="300" height="200"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results Display -->
+                <div class="results-panel">
+                    <div class="results-card">
+                        <div class="results-header">
+                            <h3><i class="fas fa-chart-line"></i> Processing Results</h3>
+                            <div class="results-status" id="resultsStatus">
+                                <span>Awaiting processing...</span>
+                            </div>
+                        </div>
+
+                        <!-- Extracted Characteristics -->
+                        <div class="characteristics-display" id="characteristicsDisplay" style="display: none;">
+                            <h4>Extracted Characteristics</h4>
+                            <div class="characteristics-grid">
+                                <div class="characteristic-item">
+                                    <label>Pattern Type:</label>
+                                    <span id="patternType" class="characteristic-value">-</span>
+                                </div>
+                                <div class="characteristic-item">
+                                    <label>Image Quality:</label>
+                                    <span id="imageQuality" class="characteristic-value">-</span>
+                                </div>
+                                <div class="characteristic-item">
+                                    <label>Ridge Density:</label>
+                                    <span id="ridgeDensity" class="characteristic-value">-</span>
+                                </div>
+                                <div class="characteristic-item">
+                                    <label>Minutiae Count:</label>
+                                    <span id="minutiaeCount" class="characteristic-value">-</span>
+                                </div>
+                                <div class="characteristic-item">
+                                    <label>Spatial Distribution:</label>
+                                    <span id="spatialDistribution" class="characteristic-value">-</span>
+                                </div>
+                                <div class="characteristic-item">
+                                    <label>Core Position:</label>
+                                    <span id="corePosition" class="characteristic-value">-</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Generated Address -->
+                        <div class="address-display" id="addressDisplay" style="display: none;">
+                            <h4>Generated O(1) Address</h4>
+                            <div class="address-container">
+                                <div class="address-value" id="generatedAddress">
+                                    000.000.000.000.000
+                                </div>
+                                <button class="copy-btn" id="copyAddressBtn" title="Copy address to clipboard">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                            <div class="address-breakdown">
+                                <div class="address-component">
+                                    <span class="component-label">Pattern:</span>
+                                    <span class="component-value" id="patternComponent">-</span>
+                                </div>
+                                <div class="address-component">
+                                    <span class="component-label">Structure:</span>
+                                    <span class="component-value" id="structureComponent">-</span>
+                                </div>
+                                <div class="address-component">
+                                    <span class="component-label">Measurement:</span>
+                                    <span class="component-value" id="measurementComponent">-</span>
+                                </div>
+                                <div class="address-component">
+                                    <span class="component-label">Quality:</span>
+                                    <span class="component-value" id="qualityComponent">-</span>
+                                </div>
+                                <div class="address-component">
+                                    <span class="component-label">Discriminator:</span>
+                                    <span class="component-value" id="discriminatorComponent">-</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Performance Metrics -->
+                        <div class="performance-metrics" id="performanceMetrics" style="display: none;">
+                            <h4>Performance Metrics</h4>
+                            <div class="metrics-grid">
+                                <div class="metric-item">
+                                    <div class="metric-value revolutionary-text" id="totalProcessingTime">-</div>
+                                    <div class="metric-label">Total Processing Time</div>
+                                </div>
+                                <div class="metric-item">
+                                    <div class="metric-value revolutionary-text" id="extractionTime">-</div>
+                                    <div class="metric-label">Feature Extraction</div>
+                                </div>
+                                <div class="metric-item">
+                                    <div class="metric-value revolutionary-text" id="classificationTime">-</div>
+                                    <div class="metric-label">Pattern Classification</div>
+                                </div>
+                                <div class="metric-item">
+                                    <div class="metric-value revolutionary-text" id="addressGenerationTime">-</div>
+                                    <div class="metric-label">Address Generation</div>
+                                </div>
+                                <div class="metric-item">
+                                    <div class="metric-value revolutionary-text" id="confidenceScore">-</div>
+                                    <div class="metric-label">Confidence Score</div>
+                                </div>
+                                <div class="metric-item">
+                                    <div class="metric-value revolutionary-text" id="qualityScore">-</div>
+                                    <div class="metric-label">Image Quality</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Success Actions -->
+                        <div class="success-actions" id="successActions" style="display: none;">
+                            <button class="action-btn primary" id="searchSimilarBtn">
+                                <i class="fas fa-search"></i>
+                                Search Similar Fingerprints
+                            </button>
+                            <button class="action-btn secondary" id="exportResultsBtn">
+                                <i class="fas fa-download"></i>
+                                Export Results
+                            </button>
+                            <button class="action-btn tertiary" id="uploadAnotherBtn">
+                                <i class="fas fa-plus"></i>
+                                Upload Another
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Error Display -->
+    <div class="error-toast" id="errorToast" style="display: none;">
+        <div class="error-content">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span id="errorMessage">An error occurred</span>
+        </div>
+        <button class="error-close" id="errorClose">
+            <i class="fas fa-times"></i>
+        </button>
+    </div>
+
+    <!-- Success Toast -->
+    <div class="success-toast" id="successToast" style="display: none;">
+        <div class="success-content">
+            <i class="fas fa-check-circle"></i>
+            <span id="successMessage">Upload successful!</span>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay" style="display: none;">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Processing fingerprint...</div>
+            <div class="loading-subtext" id="loadingSubtext">Initializing...</div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>Revolutionary O(1) System</h4>
+                    <p>World's first constant-time biometric matching technology</p>
+                    <div class="patent-info">
+                        <i class="fas fa-shield-alt"></i>
+                        <span>Patent Pending - Michael Derrick Jagneaux</span>
+                    </div>
+                </div>
+                <div class="footer-section">
+                    <h5>Performance</h5>
+                    <ul class="footer-links">
+                        <li><span class="metric-value" id="footerTotalUploads">0</span> Total Uploads</li>
+                        <li><span class="metric-value" id="footerAvgTime">0ms</span> Avg Processing</li>
+                        <li><span class="metric-value" id="footerDatabaseSize">0</span> Database Records</li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h5>System Status</h5>
+                    <div class="status-indicators">
+                        <div class="status-item">
+                            <div class="status-dot active"></div>
+                            <span>Processing Engine</span>
+                        </div>
+                        <div class="status-item">
+                            <div class="status-dot active"></div>
+                            <span>O(1) Database</span>
+                        </div>
+                        <div class="status-item">
+                            <div class="status-dot active"></div>
+                            <span>Performance Monitor</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2024 Revolutionary Biometric Technologies. Patent Pending.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="/static/js/app.js"></script>
+    <script>
+        // Initialize upload functionality when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof FingerprintUploader !== 'undefined') {
+                FingerprintUploader.init();
+            }
+        });
+    </script>
+</body>
+</html>
